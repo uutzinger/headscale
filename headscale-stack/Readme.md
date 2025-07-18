@@ -12,10 +12,10 @@ The installation uses
         - Docker
             -Caddy reverse proxy
             -Cloudflare-ddns for public domain name IP updates
-            -Headscale
-            -Headplane as headscale admin GUI
+            -Headscale (0.26.1)
+            -Headplane (0.6.0) as headscale admin GUI
     - tailscale Virtual Machine for exit node / ubuntu server
-        - tailscale installed on ubuntu (no docker)
+        - tailscale (1.84.1) installed on ubuntu (no docker)
 
 It is recommended to separate tailscale exit node from headscale VM.
 
