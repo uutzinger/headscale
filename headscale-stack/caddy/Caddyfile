@@ -1,0 +1,30 @@
+headscale.utzinger.us {
+#  # 1) Portainer at /portainer, strip prefix, proxy to HTTP 9000
+#  handle_path /portainer* {
+#    uri strip_prefix /portainer
+#    reverse_proxy portainer:9000
+#  }
+#
+#  # 2) Headplane admin
+#  handle_path /admin* {
+#    uri strip_prefix /admin
+#    reverse_proxy headplane:3000
+#  }
+#  header /admin* {
+#    Access-Control-Allow-Origin "*"
+#    Access-Control-Allow-Methods "GET, POST, PUT"
+#    Access-Control-Allow-Headers "*"
+#    Access-Control-Max-Age "100"
+#    Vary "Origin"
+#  }
+
+  # 3) Everything else → Headscale API
+  reverse_proxy * http://headscale:8080
+
+#  handle /key {
+#    root * /var/lib/headscale
+#    rewrite * /noise_public.key
+#    file_server
+#  }
+
+}
