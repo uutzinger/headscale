@@ -7,19 +7,19 @@ This installation is based on the following physical devices
 - Proxmox server
 
 The installation uses
-- proxmox
-    - headscale Virtual Machine / ubuntu server
+- **proxmox**
+    - headscale Virtual Machine / **Ubuntu serve**r
         - Docker
-            -Caddy reverse proxy
-            -Cloudflare-ddns for public domain name IP updates
-            -Headscale (0.26.1)
-            -Headplane (0.6.0) as headscale admin GUI
+            -**Caddy** reverse proxy
+            -**Cloudflare-ddns** for public domain name IP updates
+            -**Headscale (0.26.1)
+            -**Headplane** (0.6.0) as headscale admin GUI
     - tailscale Virtual Machine for exit node / ubuntu server
-        - tailscale (1.84.1) installed on ubuntu (no docker)
+        - **tailscale** (1.84.1) installed on ubuntu
 
-It is recommended to separate tailscale exit node from headscale VM.
+It is recommended to separate tailscale exit node from the headscale VM and its unnecessary to run tailscale in docker.
 
-It is helpful to have a public domain name. One can obtain them easily at Cloudflare for as little ot $7/year (e.g. yourlastname.us). For the domain you will want an entry for headscale.yourlastname.us. You can also install mail forwarding for example yourfirstname@lastname.us You need to be U.S. resident for domain `us` and registration requires publishing your phonen number. Alternative is to use duckdns.org.
+It is helpful to have a **public domain name**. One can obtain them easily at Cloudflare for as little ot $7/year (e.g. yourlastname.us). For the domain you will want an entry such as headscale.yourlastname.us. You can also install mail forwarding for example yourfirstname@lastname.us You need to be an U.S. resident for domain `us` and registration requires publishing your phone number (use one with spam call protection). Alternative free approach is to use duckdns.org.
 
 <!-- TOC start (generated with https://github.com/derlin/bitdowntoc) -->
 
@@ -39,20 +39,20 @@ It is helpful to have a public domain name. One can obtain them easily at Cloudf
 <!-- TOC --><a name="headscale"></a>
 ## Router
 
-On a gl.inet or openwrt router/WAP the portforwarding and firewall settings are stored in `/etc/config/firewall`
-You can reach the router with `ssh root@ROUTER_IP`.
+Bascially you need to:
+ - enable masquerading from WAN to LAN interface
+ - LAN to WAN allow in,out,forward
+ - portforward from WAN 80,443,3478,41641,51820 to LAN (not all are required)
+
+On a gl.inet or openwrt router/WAP the port forwarding and firewall settings are stored in `/etc/config/firewall` You can reach the router with `ssh root@ROUTER_IP`.
 
 **Abbreviations**
 
-`ROUTER_IP=192.168.16.0`
+e.g. `ROUTER_IP=192.168.1.1`
 
 **Entries in the firewall file**
 These settings also visible in the LUuCI interface but not the regular web GUI.
 
-Bascially your need to:
- - enable masquerading from WAN to LAN interface
- - LAN to WAN allow in,out,forward
- - portforward from WAN 80,443,3478,41641,51820 to LAN
 
 ```
 # On Firewall -> General Settings Tab
@@ -146,16 +146,19 @@ config redirect
 
 ## Proxmox Server
 
-Install proxmox by booting of proxmox ISO or flashdrive.
+Install proxmox by booting of proxmox ISO or flashdrive installation media.
 
-You will not want firewall setup on proxmox but you can on the operating system once installed in the VMs.
+You will not want firewall on proxmox but you can install it on the operating system once the VM works.
 
+There are 3 levels of firewalls in proxmos!
 ```
 Data Center -> Firewall -> Option No
 Data Center -> Node -> Firewall -> Option No
 Data Center -> Node -> Headscale VM -> Firewall -> Option No
 Data Center -> Node -> Talescale VM -> Firewall -> Option No
 ```
+
+Create 2 Virtual Machines (VM)
 
 **Headscale VM**
 Machine: q35, QEMU Agent: on, VirtIOSCSI: 16GB, IOThread: On, Cores:2, CPU Type: Host, Numa: On, Memory: 2.5GB, Network: VirtIO, Multiqueue: 2
@@ -169,7 +172,7 @@ Machine: q35, QEMU Agent: on, VirtIOSCSI: 8GB, IOThread: On, Cores:2, CPU Type: 
 ## Headscale Virtual Machine
 
 **Prepare the Ubuntu Server**
-Install regular Ubuntu server with no extra packages. Once it is running:
+Install regular Ubuntu server with no extra packages. Once it is running add some packages and software:
 
 ```
 sudo apt update
@@ -179,7 +182,7 @@ sudo apt install -y openssh-server
 sudo systemctl enable ssh
 sudo systemctl start ssh
 
-# 2. Remove any old versions (optional)
+# 2. Remove any old docker versions (optional)
 sudo apt remove -y docker docker-engine docker.io containerd runc
 
 # 3. Install required packages
@@ -216,8 +219,32 @@ sudo systemctl enable qemu-guest-agent
 sudo systemctl start qemu-guest-agent
 ```
 
+### Static IP
+Inside the VM assign a static IP to your interface.
+
+- determine interface name: `ip a`
+- `ls /etc/netplan`
+- `sudo nano /etc/netplan/something-config.yaml`
+- e.g. 
+```
+network:
+    ...
+    ens18:
+      dhcp4: false
+      addresses:
+        - 192.168.16.20/24
+      nameservers:
+        addresses:
+          - 1.1.1.1
+          - 8.8.8.8
+      routes:
+        - to: 0.0.0.0/0
+          via: 192.168.16.1
+```
+- sudo netplan apply
+
 ### Portainer
-Lets create separate portainer docker container.
+Lets create separate portainer docker container first.
 Once its running we can install the other containers from within portainer.
 
 ```
@@ -232,7 +259,7 @@ docker run -d \
 
 #### Headscale Stack
 
-In the user's home directy we should create the following folders and configuration files in them.
+In the user's home directy we should create the following folders and configuration files.
 
 **Directories**
 headscale-stack/
@@ -248,7 +275,7 @@ headscale-stack/headplane
 headscale-stack/headplane/lib
 headscale-stack/headplane/config/config.yaml
 
-As shown in the folder `headscale-stack` in this repo
+As shown in the folder `headscale-stack` in this repo the necessary files are:
 - [Caddy File](./caddy/Caddyfile)
 - [Head Scale Config](./headscale/config/config.yaml) [edit server_url]
 - [Head Plane Config](./headplane/config/config.yaml) [edit cookie_secret and public_url]
@@ -258,13 +285,13 @@ In portainer we will create a stack and call it `headscale`.
 **Environment variables**
 
 `CLOUDFLARE_API_KEY=<API key from your cloudflaire account>`
-`CLOUDFLARE_ZONE=something.us`
+`CLOUDFLARE_ZONE=yourlastname.us`
 `CLOUDFLARE_SUBDOMAIN=headscale`
 `HEADSCALE_STACK_PATH=/home/utzinger/headscale-stack`
 `HEADSCALE_IP=192.168.16.20`
 
-
 **Stack Configuration File**
+In portainer make this the configuration file:
 ```
 services:
   headscale:
@@ -331,7 +358,7 @@ We will want an exit node for the home LAN.
 Install minimal unbunut server.
 Install packages as shown above in Headscale server. You might need to install a few more packages as minimal server might be missing curl, jq etc.
 
-- [install Tailscale](./tailscale_exitnode/install_tailscale.sh) [edit advertise routes, enter authkey when prompted, create with script above]
+- [install Tailscale](./tailscale_exitnode/install_tailscale.sh) [edit advertise routes, enter authkey when prompted, create key with script above]
 - [remove Tailscale](./tailscale_exitnode/remove_tailscale.sh)
 - [setup Tailscale VM network](./tailscale_exitnode/tailscale_exitnode_setup.sh)
 - [check Tailscale network](./tailscale_exitnode/check_tailscale.sh)
