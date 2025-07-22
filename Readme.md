@@ -1,156 +1,93 @@
-# Headscale
+# Headscale, Tailscale, Headplane
 
-Installation of headscale on home lab network. This installation is considered moderately difficult by AI agents but making exit nodes and subnet routing working is difficult.
+Installation of a network mesh using headscale and tailscale for a home lab network.
+
+This installation is considered moderately difficult by AI agents but making exit nodes and subnet routing working when there are issues can become very difficult and time consuming.
 
 This installation is based on the following physical devices
-- gl.inet openwrt type Router/Wirless Access Point 
-- Proxmox server
+- OpenWRT type Router 
+- Proxmox server for virtual machines
 
 The installation uses
 - **proxmox**
-    - headscale Virtual Machine / **Ubuntu serve**r
+    - headscale Virtual Machine / **Ubuntu server**
         - Docker
             -**Caddy** reverse proxy
             -**Cloudflare-ddns** for public domain name IP updates
-            -**Headscale (0.26.1)
+            -**Headscale** (0.26.1)
             -**Headplane** (0.6.0) as headscale admin GUI
     - tailscale Virtual Machine for exit node / ubuntu server
         - **tailscale** (1.84.1) installed on ubuntu
 
 It is recommended to separate tailscale exit node from the headscale VM and its unnecessary to run tailscale in docker.
 
-It is helpful to have a **public domain name**. One can obtain them easily at Cloudflare for as little ot $7/year (e.g. yourlastname.us). For the domain you will want an entry such as headscale.yourlastname.us. You can also install mail forwarding for example yourfirstname@lastname.us You need to be an U.S. resident for domain `us` and registration requires publishing your phone number (use one with spam call protection). Alternative free approach is to use duckdns.org.
+## Table of Content
 
 <!-- TOC start (generated with https://github.com/derlin/bitdowntoc) -->
 
-## Table of Content
-
-- [Headscale](#headscale)
+- [Headscale, Tailscale, Headplane](#headscale-tailscale-headplane)
+   * [Table of Content](#table-of-content)
+   * [Domain Name](#domain-name)
    * [Router](#router)
    * [Proxmox Server](#proxmox-server)
+      + [Create two Virtual Machines](#create-two-virtual-machines)
+         - [**Headscale VM**](#headscale-vm)
+         - [**Tailscale VM**](#tailscale-vm)
    * [Headscale Virtual Machine](#headscale-virtual-machine)
-      + [Portainer](#portainer)
+      + [Ubuntu Server: Post Installation  ](#ubuntu-server-post-installation)
+         - [Static IP](#static-ip)
+         - [Portainer](#portainer)
          - [Headscale Stack](#headscale-stack)
-   * [Tailscale VM](#tailscale-vm)
+            * [Directories](#directories)
+            * [Portainer Headscale Stack](#portainer-headscale-stack)
+            * [Portainer/Docker Logfiles](#portainerdocker-logfiles)
+      + [Debugging](#debugging)
+   * [Tailscale VM](#tailscale-vm-1)
+      + [Optional: Create Exit Node post boot network update service](#optional-create-exit-node-post-boot-network-update-service)
    * [Tailscale client node on laptop or desktop Ubuntu](#tailscale-client-node-on-laptop-or-desktop-ubuntu)
+   * [Tailscale Android Phone](#tailscale-android-phone)
 
 <!-- TOC end -->
 
-<!-- TOC --><a name="headscale"></a>
+<!-- TOC --><a name="headscale-tailscale-headplane"></a>
+## Domain Name
+
+You need a **public domain name**. One can obtain them easily at Cloudflare for as little ot $7/year (e.g. yourlastname.us). Alternative free approach is to use duckdns.org.
+
+For the domain name you will want an entry such as headscale.`yourlastname.us`. For the`us` domain you need to be an U.S. resident and registration requires publishing your phone number (spam call protection suggested).
+
+- [Cloudflare Dashboard](https://dash.cloudflare.com)
+
+After purchasing a domain, create a DNS entry in your domain with type `A`, and `DNS only`.
+
+Cloudflare Zero Trust only provides HTTP/HTTPS tunnel and not all the ports you need for headscale. Its not used here.
+
 ## Router
 
 Bascially you need to:
- - enable masquerading from WAN to LAN interface
- - LAN to WAN allow in,out,forward
- - portforward from WAN 80,443,3478,41641,51820 to LAN (not all are required)
+ - Enable masquerading from WAN to LAN interface (default)
+ - LAN to WAN allow in,out,forward (default)
+ - Forward headscale ports from WAN to LAN
+ - Enable full cone NAT
+ - Enable Software & Hardware acceleration if available.
 
-On a gl.inet or openwrt router/WAP the port forwarding and firewall settings are stored in `/etc/config/firewall` You can reach the router with `ssh root@ROUTER_IP`.
+You might also want:
+ - Disable DNS Rebind Protection (Main GUI->Network->DNS)
+ - Disable Local Services Only(LuCi->Network->DHCP&DNS->General)
+ - Disable SYN flood protection (temporarily) (LuCi->Network->Firewall->General)
+ - Disable SIP ALG (Main GUI->Network->NAT Settings)
 
-**Abbreviations**
-
-e.g. `ROUTER_IP=192.168.1.1`
-
-**Entries in the firewall file**
-These settings also visible in the LUuCI interface but not the regular web GUI.
-
-
-```
-# On Firewall -> General Settings Tab
-config defaults
-	option input 'ACCEPT'
-	option output 'ACCEPT'
-	option forward 'REJECT'
-	option synflood_protect '1'
-
-config zone
-	option name 'lan'
-	list network 'lan'
-	option input 'ACCEPT'
-	option output 'ACCEPT'
-	option forward 'ACCEPT'
-
-config zone
-	option name 'wan'
-	list network 'wan'
-	list network 'wan6'
-	list network 'wwan'
-	option output 'ACCEPT'
-	option forward 'REJECT'
-	option mtu_fix '1'
-	option input 'DROP'
-	option masq '1'
-	option masq6 '1'
-
-config forwarding
-	option src 'lan'
-	option dest 'wan'
-	option enabled '1'
-
-# On Firewall -> Port Forwards Tab
-config redirect
-	option proto 'tcp'
-	option src_dport '80'
-	option dest_ip '192.168.16.20'
-	option src 'wan'
-	option dest 'lan'
-	option dest_port '80'
-	option idx '1'
-	option target 'DNAT'
-	option enabled '1'
-	option name 'GL-Caddy: HTTP for Let'\''s Encrypt'
-
-config redirect
-	option proto 'tcp'
-	option src_dport '443'
-	option dest_ip '192.168.16.20'
-	option src 'wan'
-	option dest 'lan'
-	option dest_port '443'
-	option target 'DNAT'
-	option enabled '1'
-	option name 'GL-Caddy: HTTPS for reverse proxy'
-
-config redirect
-	option proto 'udp'
-	option src_dport '3478'
-	option dest_ip '192.168.16.20'
-	option dest_port '3478'
-	option src 'wan'
-	option dest 'lan'
-	option target 'DNAT'
-	option enabled '1'
-	option name 'GL-Talescale: STUN for NAT traversal'
-
-config redirect
-	option proto 'udp'
-	option src_dport '41641'
-	option dest_port '41641'
-	option src 'wan'
-	option dest 'lan'
-	option dest_ip '192.168.16.20'
-	option target 'DNAT'
-	option enabled '1'
-	option name 'GL-Headscale: DERP for Tailscale'
-
-config redirect
-	option proto 'udp'
-	option src_dport '51820'
-	option dest_port '51820'
-	option src 'wan'
-	option dest 'lan'
-	option dest_ip '192.168.16.20'
-	option target 'DNAT'
-	option enabled '1'
-	option name 'GL-Wireguard: UDP'
-```
+Read [Router Configuration](./Router.md) for the commands needed for openwrt to set this up.
 
 ## Proxmox Server
 
-Install proxmox by booting of proxmox ISO or flashdrive installation media.
+Install proxmox by booting of proxmox ISO or flashdrive proxmox installation media.
 
-You will not want firewall on proxmox but you can install it on the operating system once the VM works.
+You will not want the firewalls on proxmox but you can install it on the operating system once the virtual machines works.
 
-There are 3 levels of firewalls in proxmos!
+There are 3 levels of firewalls in proxmox!
+
+In the proxmox GUI:
 ```
 Data Center -> Firewall -> Option No
 Data Center -> Node -> Firewall -> Option No
@@ -158,68 +95,31 @@ Data Center -> Node -> Headscale VM -> Firewall -> Option No
 Data Center -> Node -> Talescale VM -> Firewall -> Option No
 ```
 
-Create 2 Virtual Machines (VM)
+In the proxmox node shell check `pve-firewall status` It should say disabled
 
-**Headscale VM**
+### Create two Virtual Machines
+
+You will need to have Ubuntu Server iso downloaded and available in the proxmox node local ISO images storage.
+Use LTS version and Ubuntu server.
+
+#### **Headscale VM**
 Machine: q35, QEMU Agent: on, VirtIOSCSI: 16GB, IOThread: On, Cores:2, CPU Type: Host, Numa: On, Memory: 2.5GB, Network: VirtIO, Multiqueue: 2
 
 Multiqueue should not be larger than number of cores.
 Memory should have Ballooning Device enabled
 
-**Tailscale VM**
+#### **Tailscale VM**
 Machine: q35, QEMU Agent: on, VirtIOSCSI: 8GB, IOThread: On, Cores:2, CPU Type: Host, Numa: On, Memory: 1.5GB, Network: VirtIO, Multiqueue: 2
 
 ## Headscale Virtual Machine
 
-**Prepare the Ubuntu Server**
-Install regular Ubuntu server with no extra packages. Once it is running add some packages and software:
+### Ubuntu Server: Post Installation  
 
-```
-sudo apt update
+Install a regular Ubuntu server with no extra packages. Once it is running add some packages and software in the proxmox shell for the VM. Once SSH works you can ssh into the server:
 
-# 1. Install OpenSSH
-sudo apt install -y openssh-server
-sudo systemctl enable ssh
-sudo systemctl start ssh
+[Install basic pacakges](./ubuntu_server_bassic_packages.sh)
 
-# 2. Remove any old docker versions (optional)
-sudo apt remove -y docker docker-engine docker.io containerd runc
-
-# 3. Install required packages
-sudo apt install -y \
-    ca-certificates \
-    curl \
-    gnupg \
-    lsb-release
-
-# 4. Add Docker’s official GPG key
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
-    sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-
-# 5. Add Docker's repository
-echo \
-  "deb [arch=$(dpkg --print-architecture) \
-  signed-by=/etc/apt/keyrings/docker.gpg] \
-  https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-# 6. Install Docker Engine
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-sudo usermod -aG docker $USER
-newgrp docker
-
-# 7. Install QEMU guest
-sudo apt update
-sudo apt install -y qemu-guest-agent
-sudo systemctl enable qemu-guest-agent
-sudo systemctl start qemu-guest-agent
-```
-
-### Static IP
+#### Static IP
 Inside the VM assign a static IP to your interface.
 
 - determine interface name: `ip a`
@@ -241,135 +141,166 @@ network:
         - to: 0.0.0.0/0
           via: 192.168.16.1
 ```
-- sudo netplan apply
+- `sudo netplan apply`
 
-### Portainer
-Lets create separate portainer docker container first.
-Once its running we can install the other containers from within portainer.
+#### Portainer
+
+Lets create portainer docker container in the server. Once its running we can install the other containers from within portainer.
 
 ```
+docker network create headscale_net
+
 docker run -d \
 --name portainer \
 --restart unless-stopped \
+--network headscale_net \
 -p 9000:9000 \
 -p 9443:9443 \
 -v /var/run/docker.sock:/var/run/docker.sock \
 -v portainer_data:/data portainer/portainer-ce:latest
 ```
 
+Connect to portainer with the op of the headscale VM `https://<headscale ip>:9443`. Create the necessary first time installation.
+
 #### Headscale Stack
 
-In the user's home directy we should create the following folders and configuration files.
+We will create a docker stack and expose the config files.
 
-**Directories**
-headscale-stack/
-headscale-stack/caddy/Caddyfile
-headscale-stack/caddy/data/
+In the user's home directory we should create the following folders:
 
-headscale-stack/headscale/
-headscale-stack/headscale/lib
-headscale-stack/headscale/run
-headscale-stack/headscale/config/config.yaml
+##### Directories
 
-headscale-stack/headplane
-headscale-stack/headplane/lib
-headscale-stack/headplane/config/config.yaml
+mkdir -p ~/headscale-stack/caddy/{data,config}
+mkdir -p ~/headscale-stack/headscale/{lib,run,config}
+mkdir -p ~/headscale-stack/headplane/{config,lib}
+mkdir -p ~/headscale-stack/cloudflared
 
-As shown in the folder `headscale-stack` in this repo the necessary files are:
-- [Caddy File](./caddy/Caddyfile)
-- [Head Scale Config](./headscale/config/config.yaml) [edit server_url]
-- [Head Plane Config](./headplane/config/config.yaml) [edit cookie_secret and public_url]
+The necessary files are:
+- Caddy File: (./caddy/Caddyfile)
+- Head Scale Config: (./headscale/config/config.yaml) 
+- Head Plane Config: (./headplane/config/config.yaml) [edit cookie_secret and public_url]
+
+The **Caddyfile** should contain:
+```
+headscale.utzinger.us {
+	reverse_proxy headscale:8080
+}
+```
+
+The **Headscale config** default file is obtained from https://github.com/juanfont/headscale. 
+
+It's the `config-example.yaml` and it needs to go to `headscale/config/config.yaml`
+
+You need to change the following:
+- server_url: `https://<your full public hostname>`
+- *_addr from `127.0.0.1` to `0.0.0.0`
+- `derp:serve:enabled: true`
+- `ephemeral_node_inactivity_timeout:` longer than 30minutes, a machine with ephemeral key be removed from the network if its turned off after that amount of time.
+- `policy:mode:database` so you can edit in headplane
+- `dns:base_domain: <domain of your choice>` but not the public domain.
+
+The **Headplane config** default file is obtained from https://github.com/tale/headplane/:
+
+You need to change the following:
+- `server:cookie_secret: "<any 32 characters, no more or less>"`
+- `headscale:url: "http://headscale:8080"`
+- `headscale:public_url: "https://<your public hostname>"`
+- `integration:docker:enabled: true`
+- `oidc:` all commented out with "#"
+
+Once the headscale stack is running you need to create access control list for headscale. That you best done in headplane: `<http://yourheadscal VM ip>:3000/admin` got to "Access Control" and enter:
+```
+{
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["*"],
+      "dst": ["*:*"]
+    }
+  ]
+}
+```
+
+##### Portainer Headscale Stack
 
 In portainer we will create a stack and call it `headscale`.
 
 **Environment variables**
 
-`CLOUDFLARE_API_KEY=<API key from your cloudflaire account>`
-`CLOUDFLARE_ZONE=yourlastname.us`
-`CLOUDFLARE_SUBDOMAIN=headscale`
 `HEADSCALE_STACK_PATH=/home/utzinger/headscale-stack`
-`HEADSCALE_IP=192.168.16.20`
+`CLOUDFLARE_API_KEY=<key you obtain from cloudflare>`
+`CLOUDFLARE_ZONE=<the domain you purchased> `
+`CLOUDFLARE_SUBDOMAIN=headscale or similar`
 
-**Stack Configuration File**
-In portainer make this the configuration file:
-```
-services:
-  headscale:
-    image: headscale/headscale:0.26.1
-    container_name: headscale
-    volumes:
-      - '${HEADSCALE_STACK_PATH}/headscale/lib:/var/lib/headscale'
-      - '${HEADSCALE_STACK_PATH}/headscale/run:/var/run/headscale'
-      - '${HEADSCALE_STACK_PATH}/headscale/config:/etc/headscale'
-    ports:
-      - "8080:8080"
-      - "41641:41641/udp"
-      - "3478:3478/udp"
-    command: serve
-    labels:
-      # This is needed for Headplane to find it and signal it
-      me.tale.headplane.target: headscale
-    restart: unless-stopped
+Enter the [Stack Configuration File](./portainer-docker.yaml) into the editor.
 
-  headplane:
-    image: ghcr.io/tale/headplane:0.6.0
-    container_name: headplane
-    ports:
-      - "3000:3000"
-    volumes:
-      - '${HEADSCALE_STACK_PATH}/headplane/config:/etc/headplane'
-      - '${HEADSCALE_STACK_PATH}/headplane/lib:/var/lib/headplane'
-      - '/var/run/docker.sock:/var/run/docker.sock:ro'
-      - '${HEADSCALE_STACK_PATH}/headscale/config:/etc/headscale'
-    depends_on:
-      - headscale
-    restart: unless-stopped
+##### Portainer/Docker Logfiles
+When you devoid the stack and the containers run you need to address any issues you find the log files.
 
-  caddy:
-    image: caddy:latest
-    container_name: caddy
-    ports:
-      - "${HEADSCALE_IP}:80:80"
-      - "${HEADSCALE_IP}:443:443"
-    volumes:
-      - '${HEADSCALE_STACK_PATH}/caddy/Caddyfile:/etc/caddy/Caddyfile'
-      - '${HEADSCALE_STACK_PATH}/caddy/data:/data'
-      - '${HEADSCALE_STACK_PATH}/headscale/lib:/var/lib/headscale:ro'
-    restart: unless-stopped
+Connect to Portainer in your browser then Containers>Quick Action>Logs.
 
-  ddns:
-    image: oznu/cloudflare-ddns
-    container_name: cloudflare-ddns
-    restart: unless-stopped
-    environment:
-      - API_KEY=${CLOUDFLARE_API_KEY}
-      - ZONE=${CLOUDFLARE_ZONE}
-      - SUBDOMAIN=${CLOUDFLARE_SUBDOMAIN}
-      - PROXIED=false
-```
+All container need to be attached to `headscale_default` network which you can check in protainer by clicking on the container.
 
-- [create authkey](./headscale/create_authkey.sh) [edit user ID/number]
-- [check headscale](./headscale/check_headscale.sh)
+### Debugging
+
+docker run --rm -it --network headscale_default busybox ping headscale
 
 ## Tailscale VM
 
-We will want an exit node for the home LAN.
+We will want an exit node for the home LAN. We will use:
+- minimal unbunut server.
+- install packages as shown above in Headscale server (ubuntu_server_basic_packages.sh). You might need to install a few more packages as minimal server might be missing curl, jq etc.
 
-Install minimal unbunut server.
-Install packages as shown above in Headscale server. You might need to install a few more packages as minimal server might be missing curl, jq etc.
+- [install Tailscale exit node](./install_tailscale_exitnode.shnstall_tailscale.sh) 
+  - edit advertise routes
+  - enter authkey when prompted
+  - create auth key with script `create_authkey.sh`
 
-- [install Tailscale](./tailscale_exitnode/install_tailscale.sh) [edit advertise routes, enter authkey when prompted, create key with script above]
-- [remove Tailscale](./tailscale_exitnode/remove_tailscale.sh)
-- [setup Tailscale VM network](./tailscale_exitnode/tailscale_exitnode_setup.sh)
-- [check Tailscale network](./tailscale_exitnode/check_tailscale.sh)
+- Go to headplane and click on the new machine
+  - Enable exit node
+  - Enable routers
+
+- [check Tailscale installation](./tailscale_exitnode/check_tailscale.sh)
 
 An exit node will need packet forwarding and masquerading and firewall should allow access as attempted in the provided script.
 
-Unfortuantely seeing the machines in the tailscale network does not mean routing or exit node function will work. Its very time consuming to determine the configuration errors.
+If you have issue with persitent network configuration install the service described below.
+
+### Optional: Create Exit Node post boot network update service
+
+If your network settings are not persistent on the exit node you can create a system service: `nano /etc/systemd/system/tailscale-exitnode-setup.service`
+
+Its content should be:
+
+```
+[Unit]
+Description=Tailscale Exit Node Boot Fixes
+After=network.target tailscaled.service
+Requires=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/home/uutzinger/tailscale_exitnode_postboot.sh
+
+[Install]
+WantedBy=multi-user.target
+uutzinger@tailscale:~$ 
+```
+
+and the script `tailscale_exitnode_postboot.sh` should be present at correct location (see this repo).
 
 ## Tailscale client node on laptop or desktop Ubuntu
 
-- [install Tailscale](./tailscale_client/install_tailscale_laptop.sh) [edit advertise routes]
-- [remove Tailscale](./tailscale_client/remove_tailscale_laptop.sh)
-- [setup Tailscale VM network](./tailscale_client/tailscale_laptop_setup.sh)
-- [check Tailscale network](./tailscale_client/check_tailscale.sh)
+- [install Tailscale](./install_tailscale_node.sh) [edit advertise routes]
+- [check Tailscale network](./check_tailscale.sh)
+
+If you are using gnome browse the gnome shell extension and search for tailscale. Install the tailscale dock.
+
+## Tailscale Android Phone
+
+From playstore install tailscale.
+
+Under `Settings:Accounts` use the three dots to `Use a different server` and enter your headscale public hostname. It will give you command to add the phone to your network.
+
+Since headscale runs in docker you need to ssh to the headscale VM and enter `docker exec headscale <Command that was displayed>` or you open Headplane and at the machine with `Machines>Add Device>Register Machine Key`

@@ -56,8 +56,8 @@ echo "[INFO] Starting Tailscale and authenticating..."
 if sudo tailscale up \
   --authkey "$TAILSCALE_AUTHKEY" \
   --hostname pop-os \
-  --login-server=https://headscale.utzinger.us \
-  --operator=uutzinger \
+  --login-server=https://headscale.something \
+  --operator=<your-username-in ubuntu> \
   --accept-routes \
   --accept-dns=true \
   --reset; then

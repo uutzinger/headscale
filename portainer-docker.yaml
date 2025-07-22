@@ -1,0 +1,65 @@
+services:
+
+  headscale:
+    image: headscale/headscale:0.26.1
+    container_name: headscale
+    volumes:
+      - '${HEADSCALE_STACK_PATH}/headscale/lib:/var/lib/headscale'
+      - '${HEADSCALE_STACK_PATH}/headscale/run:/var/run/headscale'
+      - '${HEADSCALE_STACK_PATH}/headscale/config:/etc/headscale'
+    expose:
+      - "8080"       # http
+      - "9090"       # metrics
+
+    command: serve
+    labels:
+      # This is needed for Headplane to find it and signal it
+      me.tale.headplane.target: headscale
+    restart: unless-stopped
+    networks:
+      - headscale_default
+
+  headplane:
+    image: ghcr.io/tale/headplane:0.6.0
+    container_name: headplane
+    ports:
+      - "3000:3000"
+    volumes:
+      - '${HEADSCALE_STACK_PATH}/headplane/config:/etc/headplane'
+      - '${HEADSCALE_STACK_PATH}/headplane/lib:/var/lib/headplane'
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+      - '${HEADSCALE_STACK_PATH}/headscale/config:/etc/headscale'
+    depends_on:
+      - headscale
+    restart: unless-stopped
+    networks:
+      - headscale_default
+
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - '${HEADSCALE_STACK_PATH}/caddy/Caddyfile:/etc/caddy/Caddyfile'
+      - '${HEADSCALE_STACK_PATH}/caddy/data:/data'
+      - '${HEADSCALE_STACK_PATH}/caddy/config:/config'
+      - '/etc/localtime:/etc/localtime:ro'
+    restart: unless-stopped
+    networks:
+      - headscale_default
+
+  ddns:
+    image: oznu/cloudflare-ddns
+    container_name: ddns
+    restart: unless-stopped
+    environment:
+      - API_KEY=${CLOUDFLARE_API_KEY}
+      - ZONE=${CLOUDFLARE_ZONE}
+      - SUBDOMAIN=${CLOUDFLARE_SUBDOMAIN}
+      - PROXIED=false
+
+networks:
+  headscale_default:
+    external: true

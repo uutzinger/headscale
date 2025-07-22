@@ -2,7 +2,7 @@
 
 ENABLE_FORWARDING=false  # set true if you are routing
 
-LOG_FILE="/home/uutzinger/setup/tailscale_laptop_setup.log"
+LOG_FILE="/home/<where you want your log>/tailscale_laptop_setup.log"
 > "$LOG_FILE"  # Clears previous log on each run
 exec > >(tee -a "$LOG_FILE") 2>&1
 
